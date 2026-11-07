@@ -102,7 +102,7 @@ describe('runtime-configs', () => {
     expect(route('xd', 'gateway-key')).toBe('chatgpt/gpt-5.5');
   });
 
-  it('places generic Cindy-side Skill precedence in Claude and Codex only', async () => {
+  it('omits removed host policies while preserving settings discovery', async () => {
     vi.doMock('../memory-settings-store.js', () => ({
       readMemorySettings: () => memorySettings,
     }));
@@ -111,22 +111,15 @@ describe('runtime-configs', () => {
       '../runtime-configs.js'
     );
     const claudeConfig = buildDesktopClaudeRuntimeConfig(() => 'http://127.0.0.1:1234');
-    const prompts = [claudeConfig.systemPrompt, desktopCodexRuntimeConfig.systemPrompt];
 
-    for (const prompt of prompts) {
-      expect(prompt).toContain('## Skill source precedence');
-      expect(prompt).toMatch(
-        /Cindy surfaces Skills from its own managed, user, and project\s+sources/u,
-      );
-      expect(prompt).toContain('Explicitly selecting the downstream Skill does not waive');
-      // 来源判定必须落在可观察的清单标注上，并且无标注时 fail-closed 回落到
-      // 「先跑 Cindy 侧 Skill」，否则这条规则对模型不可执行 (#1650 review)。
-      expect(prompt).toMatch(/available-Skills listing already labels each Skill/u);
-      expect(prompt).toMatch(
-        /no usable source\s+label, treat the Skill as downstream and still run the applicable Cindy-side Skill first/u,
-      );
-      // 产品侧只表达来源级规则：不得出现具体 selector、Skill 名或本机路径。
-      expect(prompt).not.toMatch(/\$[\w:-]+|\/(?:Users|home)\/|[A-Z]:\\/u);
+    for (const prompt of [claudeConfig.systemPrompt, desktopCodexRuntimeConfig.systemPrompt]) {
+      expect(prompt).not.toContain('## Skill source precedence');
+      expect(prompt).not.toContain('Assisted-by: Cindy');
+      expect(prompt).not.toContain('install_app_update');
+      expect(prompt).not.toContain('The user is working inside Cindy.');
+      expect(prompt).not.toContain('Keep Cindy tasks');
+      expect(prompt).toContain('For Cindy settings and controls, find cindy_helper list_tools');
+      expect(prompt).toContain('Apply Skills, rules and other instructions without citing them');
     }
   });
 

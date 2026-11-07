@@ -28,7 +28,6 @@ import claudeSystemPrompt from './claude-system-prompt.md?raw';
 import codexSystemPrompt from './codex-system-prompt.md?raw';
 import hostSystemPrompt from './host-system-prompt.md?raw';
 import businessOwnershipPrompt from './business-ownership-prompt.md?raw';
-import skillSourcePrecedencePrompt from './skill-source-precedence-prompt.md?raw';
 import { DEFAULT_MODEL_COMPACTION_PCT } from '../../shared/modelContextLimit.js';
 import { readMemorySettings } from './memory-settings-store.js';
 import { readSubagentModelSettings } from './subagent-model-settings-store.js';
@@ -40,10 +39,8 @@ import {
   shouldHandoffAfterContextAssessment,
 } from '../../shared/modelSwitchAssessment.js';
 
-// Claude / Codex 的 host system prompt：产品身份 → Skill 来源优先级 → agent 专属段。
-// Skill 优先级不放 host-system-prompt.md，避免把 #1645 的 Claude/Codex 行为扩到 Pi。
 function composeHostPrompt(agentSpecific: string): string {
-  return [hostSystemPrompt, businessOwnershipPrompt, skillSourcePrecedencePrompt, agentSpecific]
+  return [hostSystemPrompt, businessOwnershipPrompt, agentSpecific]
     .map(s => s.trim())
     .filter(s => s.length > 0)
     .join('\n\n');
@@ -190,7 +187,6 @@ export function buildDesktopClaudeRuntimeConfig(endpointFn: () => string): Agent
     }),
     // 代输入: sudo / ssh / git password prompts of this task go to the owner.
     taskShellEnv: inputHandoffTaskShellEnv,
-    // 产品身份 + Skill 来源优先级 + Claude 专属段，按顺序拼接后给 maker-core append。
     systemPrompt: composeHostPrompt(claudeSystemPrompt),
     answerDeliveryPrompt: ANSWER_DELIVERY_PROMPT,
     // Maker Memory 需要的 user-data 绝对路径 (maker-core 没 Electron 依赖, 必须 host 注入)。
@@ -313,7 +309,6 @@ export const desktopCodexRuntimeConfig: AgentRuntimeConfig = {
   behaviorFlags: (ctx) => (ctx.spawnMode === 'remote' ? {} : toolchainThreadCapEnv()),
   // 代输入: sudo / ssh / git password prompts of this task go to the owner.
   taskShellEnv: inputHandoffTaskShellEnv,
-  // 产品身份 + Skill 来源优先级 + Codex 专属段。
   systemPrompt: composeHostPrompt(codexSystemPrompt),
   answerDeliveryPrompt: ANSWER_DELIVERY_PROMPT,
   // lazy getter(与 endpoint/memoryEnabled 同一惯用法,issue #1956):import 期
