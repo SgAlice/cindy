@@ -1874,6 +1874,8 @@ export function TodaySpendChip({
     'focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] rounded-full',
   );
 
+  if (isClaudeSubscription) return null;
+
   return (
     <div
       ref={chipRef}

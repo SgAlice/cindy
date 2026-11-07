@@ -1,86 +1,15 @@
-import {
-  buildClientDeviceNote,
-  type MessageSourceDevice,
-  type MessageSourceHostDevice,
-} from '@cindy/maker-shared/message-source';
+import type { MessageSourceDevice, MessageSourceHostDevice } from '@cindy/maker-shared/message-source';
 
-/**
- * 远程设备来源 —— 盖章、透传、以及逐轮追加到**发给 agent 的 wire 消息**上的 `[客户端说明]`。
- *
- * 为什么需要:同一个桌面会话既可能在电脑上用,也可能被手机或另一台电脑远程控制。
- * 模型无从得知这一轮用户在哪台设备上;产出 HTML 之类可预览成品时,自包含单文件在手机上
- * 体验明显更好(多文件产物的同目录资源要逐个回取,见 mobile 的 htmlLocalResources)。
- * 说明只陈述事实(哪台设备、操作的是哪台电脑,名字一律配 id),怎么做交给模型判断;
- * 手机额外保留产出偏好。本机输入不盖章,也就没有这段说明。
- *
- * ── 为什么不进 system prompt(重要,别"优化"回去) ─────────────────────────
- * docs/dev-rules/maker-core-and-agent-behavior.md:
- *  - §3.1:prompt cache 命中依赖请求前缀逐字节稳定,**易变内容只能进 per-call
- *    userPrompt 段**。控制端会中途切换(在电脑上开的会话,走开后用手机继续),放进
- *    system 前缀既拖缓存率,又会在切换后变成陈旧信息反过来误导模型。
- *  - §4:system prompt 任何改动都要仓库维护者显式确认。本机制刻意不碰它。
- * 追加在 wire 消息上,与 IM 渠道说明(hook-control/outbound.buildHookPromptNote)
- * 及引擎交接前缀(agentHandoff.prependHandoffToUserMessage)同一层、同一套语义:
- * **只进喂给 agent 的内容,不进落库/显示的用户消息原话。**
- * 「逐轮」不等于每轮都重复一份:同一原生上下文里内容没变就不再前置(wireNoteMemory.ts),
- * 换窗、原生压缩、/clear 之后整体重发一次——长对话里几十份一模一样的说明只占窗口。
- *
- * ── 与代码职责的分界(§2 能用代码保证的不甩给 prompt) ────────────────────
- * 「产出物在手机上打不开」已经由代码解决:手机端能渲染 HTML 并把同目录资源取回来。
- * 所以这里**不写**「不要给本地路径」——路径在手机上是可点可渲染的,那样写会和已有
- * 能力打架。prompt 只承担代码补不了的那半:让模型在**生成时**就倾向自包含单文件。
- *
- * 设备来源只用于归属展示与这段说明,**不是**任何信任 / 权限判据。
- */
-
-/**
- * 手机的产出偏好(固定文本)。
- *
- * 措辞约束:
- *  - 用「优先」而不是「必须」:用户明确要多文件产物时不该被这条挡住;
- *  - 不解释机制细节,只给可执行的产出偏好。
- */
-const MOBILE_OUTPUT_PREFERENCE =
-  '产出 HTML 等可预览成品时**优先做成自包含单文件**:样式与脚本内联,'
-  + '图片用 data: URI 或公网地址,避免拆成需要同目录资源的多文件产物;'
-  + '用户明确要求多文件时照常产出。'
-  + '给出文件路径时同时给出结论或内容摘要,不要只回一个路径。';
-
-/**
- * 旧版手机说明:只在队列项带 `fromMobileClient` 却没有设备信息时使用(老崩溃快照、
- * 平台已知但还没盖设备章的旧路径),保持升级前后同一条消息的说明不变。
- *
- * 首句必须声明这不是用户消息,否则模型会把它当请求来回应或复述(IM 渠道说明踩过)。
- */
 export function buildMobileClientPromptNote(): string {
-  return (
-    '[客户端说明] 以下为系统每轮自动追加的环境说明,不是用户发来的消息;'
-    + '回复时不要把它当作用户的请求,也不要引用、复述或据此臆测用户意图。'
-    + '本轮请求来自手机客户端(小屏、远程查看被控电脑上的文件)。'
-    + MOBILE_OUTPUT_PREFERENCE
-  );
+  return '';
 }
 
-/**
- * 本轮发给模型的 `[客户端说明]`;本机输入(无设备来源、也不是旧手机标记)返回 null。
- *
- *  - 有设备来源:`buildClientDeviceNote`(首句同样声明「不是用户消息」),手机再接产出偏好;
- *    另一台电脑只说设备事实。
- *  - 只有旧 `fromMobileClient` 标记:沿用旧版手机说明。
- *
- * 「逐字节稳定」在这里指**对同一台设备稳定**:设备名与 id 不随轮次变化,不含时间戳 /
- * 计数器等易变量;换一台设备操作时说明随之变化,这本来就是它要传达的事实。
- */
-export function buildClientEnvironmentNote(params: {
+export function buildClientEnvironmentNote(_params: {
   device?: MessageSourceDevice;
   host?: MessageSourceHostDevice;
   legacyMobile?: boolean;
 }): string | null {
-  if (params.device) {
-    const deviceNote = buildClientDeviceNote(params.device, params.host);
-    return params.device.platform === 'mobile' ? `${deviceNote}${MOBILE_OUTPUT_PREFERENCE}` : deviceNote;
-  }
-  return params.legacyMobile ? buildMobileClientPromptNote() : null;
+  return null;
 }
 
 function singleTextContent(message: unknown): string | null {

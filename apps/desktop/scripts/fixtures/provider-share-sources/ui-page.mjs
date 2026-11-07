@@ -23,7 +23,7 @@ export default {
     'subscription-codex-choice': { about: 'An existing Codex login is shown before choosing it or another account' },
     'subscription-login': { about: 'OpenAI browser login adds an account inside the existing provider' },
     'subscription-cancel': { about: 'Closing OpenAI login cancels its owned CLI operation without creating another provider' },
-    'subscription-pool': { about: 'The real local provider detail shows both subscription accounts, each with all of its own usage windows, under one provider header' },
+    'subscription-pool': { about: 'The real local provider detail keeps both Claude account controls without showing subscription quota' },
     default: { about: 'Local and remote outgoing shares appear together, separately from ordinary providers' },
     'shared-sources': { about: 'Local and remote outgoing shares appear together, separately from ordinary providers' },
     'no-outgoing-shares': { about: 'The outgoing section disappears without established shares' },
@@ -67,14 +67,7 @@ export default {
       await accounts.getByText('alex@example.com', { exact: true }).waitFor();
       assert.equal(await accounts.getByText('work@example.com', { exact: true }).count(), 1);
       assert.equal(await accounts.getByRole('switch').count(), 2);
-      // Each account shows every window of its own quota once; no provider-level copy repeats one account.
-      for (const identity of ['alex@example.com', 'work@example.com']) {
-        const row = accounts.locator('div.py-4').filter({ hasText: identity });
-        for (const name of [await ui.t('quotaCard.fiveHourLabel'), await ui.t('quotaCard.weeklyLabel'), await ui.t('quotaCard.modelWeeklyLabel', { model: 'Fable' })])
-          // High-usage bars append a screen-reader severity note to their accessible name.
-          assert.equal(await row.getByRole('progressbar', { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`) }).count(), 1, `${identity}: ${name}`);
-      }
-      assert.equal(await page.getByRole('progressbar').count(), 6);
+      assert.equal(await page.getByRole('progressbar').count(), 0);
       return;
     }
     if (ui.case === 'builtin-save-guard') {

@@ -178,7 +178,7 @@ describe('provider weekly quota identity and windows', () => {
         provider('account-b', { source: 'user', auth: { method: 'oauth', native: 'codex' } }),
       ),
     ).toBe('codex');
-    expect(providerWeeklyQuotaSource(provider('anthropic'))).toBe('claude');
+    expect(providerWeeklyQuotaSource(provider('anthropic'))).toBeNull();
     expect(providerWeeklyQuotaSource(provider('xai'))).toBe('xai');
     expect(providerWeeklyQuotaSource(provider('opencode-go', {
       source: 'user',
@@ -303,7 +303,7 @@ describe('provider rail weekly remaining bars', () => {
     );
     expect(reads.codex).toHaveBeenCalledWith(true, 'second');
   });
-  it('uses Claude account weekly quota and hides expired xAI quota', () => {
+  it('hides Claude quota and expired xAI quota', () => {
     reads.codex.mockReturnValue({ snapshot: null });
     reads.claude.mockImplementation((enabled) =>
       enabled ? { fiveHour: { utilization: 95 }, sevenDay: { utilization: 40 } } : null,
@@ -332,10 +332,10 @@ describe('provider rail weekly remaining bars', () => {
       [...container.querySelectorAll('[data-weekly-remaining]')].map((el) =>
         el.getAttribute('data-weekly-remaining'),
       ),
-    ).toEqual(['60', '4']);
+    ).toEqual(['4']);
     expired = true;
     rerender(<UnifiedModelRail {...props} />);
-    expect(container.querySelectorAll('[data-weekly-remaining]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-weekly-remaining]')).toHaveLength(0);
   });
   it('reads remote directories from the device mirrors, never local quotas', () => {
     reads.codex.mockReturnValue({ snapshot: null });
@@ -368,9 +368,10 @@ describe('provider rail weekly remaining bars', () => {
       [...container.querySelectorAll('[data-weekly-remaining]')].map((el) =>
         el.getAttribute('data-weekly-remaining'),
       ),
-    ).toEqual(['75', '30']);
+    ).toEqual(['75']);
     expect(reads.remoteCodex).toHaveBeenCalledWith('device-1', 'openai', { live: true, web: false });
-    expect(reads.remoteClaude).toHaveBeenCalledWith('device-1', 'anthropic');
+    expect(reads.remoteClaude).toHaveBeenCalledWith(null, 'anthropic');
+    expect(reads.remoteClaude.mock.calls.some(([deviceId]) => deviceId !== null)).toBe(false);
     expect(reads.remoteXai).toHaveBeenCalledWith('device-1', 'xai');
     for (const read of [reads.codex, reads.claude, reads.xai])
       expect(read.mock.calls.some(([enabled]) => enabled)).toBe(false);
@@ -441,8 +442,8 @@ describe('provider rail weekly remaining bars', () => {
           .getByRole('button', { name })
           .querySelector('[data-weekly-remaining]')
           ?.getAttribute('data-weekly-remaining');
-      expect(remaining('Task host')).toBe('75');
-      expect(remaining('Other device')).toBe('20');
+      expect(remaining('Task host')).toBe(id === 'anthropic' ? undefined : '75');
+      expect(remaining('Other device')).toBe(id === 'anthropic' ? undefined : '20');
       for (const read of [reads.codex, reads.claude, reads.xai])
         expect(read.mock.calls.some(([enabled]) => enabled)).toBe(false);
 
@@ -452,8 +453,8 @@ describe('provider rail weekly remaining bars', () => {
           remoteSources={{ ...props.remoteSources, localUsageDeviceId: null }}
         />,
       );
-      expect(remaining('Task host')).toBe('90');
-      expect(remaining('Other device')).toBe('20');
+      expect(remaining('Task host')).toBe(id === 'anthropic' ? undefined : '90');
+      expect(remaining('Other device')).toBe(id === 'anthropic' ? undefined : '20');
     },
   );
 });

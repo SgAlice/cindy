@@ -7,9 +7,11 @@
  * 一直顶在 chip 上)。
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
+  useClaudeSubscriptionUsage,
+  requestClaudeSubscriptionRefresh,
   reduceClaudeSubscriptionPush,
   resolvePersistedClaudeSubscriptionRead,
 } from '../hooks/useClaudeSubscriptionUsage';
@@ -51,5 +53,18 @@ describe('reduceClaudeSubscriptionPush', () => {
   it('keeps the current value on malformed payloads', () => {
     expect(reduceClaudeSubscriptionPush(current, 'garbage')).toBe(current);
     expect(reduceClaudeSubscriptionPush(current, undefined)).toBe(current);
+  });
+});
+
+describe('disabled local Claude quota', () => {
+  it('does not read persisted quota or request a CLI refresh', () => {
+    const access = vi.fn(() => { throw new Error('IPC must not be accessed'); });
+    vi.stubGlobal('window', { get electronAPI() { return access(); } });
+    try {
+      expect(useClaudeSubscriptionUsage(true)).toBeNull();
+      expect(useClaudeSubscriptionUsage(true, 'custom-claude')).toBeNull();
+      requestClaudeSubscriptionRefresh();
+      expect(access).not.toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); }
   });
 });

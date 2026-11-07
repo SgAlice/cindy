@@ -15,7 +15,6 @@
  * 与 vendor/claude/runtime.ts 的差异：
  * - env 三段组装走 maker-core 的 AuthAdapter.getAuthEnv() + AgentRuntimeConfig
  * - mcpServers 字段由 host 注入的 mcpProviders 生成（具体 MCP 不在 maker-core 内）
- * - systemPrompt.append 由 maker-core 拼接四段(preset / engine / host产品级 / per-call)
  * - vendorOptions.source / forkSession / resumeSessionAt / extraSystemPrompt / onStderrLine
  *   仍然通过 vendorOptions 透传（与 vendor 版语义一致）
  *
@@ -81,10 +80,7 @@ import {
 } from '../base-agent.js';
 import { preparePinnedClaudeSkillInvocation } from './pinned-skill-invocation.js';
 import { isBotMcpServerAllowed } from '../shared/bot-runtime-policy.js';
-import { SYSTEM_PROMPT_APPEND as MAKER_SYSTEM_PROMPT_APPEND } from './system-prompt-append.js';
-import { MAKER_MEMORY_RULES } from '../../memory/system-prompt.js';
-import { MemoryFlushController } from '../../memory/flush-controller.js';
-import { resolveMemoryScopeKey } from '../../memory/scope-resolver.js';
+import { buildClaudeSystemPromptAppend } from './system-prompt-append.js';
 import type {
   Capabilities,
   EffortDescriptor,
@@ -242,35 +238,7 @@ import { classifyShellCommand } from '../shared/auto-review.js';
 
 type ClaudeSdkEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
-export function buildClaudeSystemPromptAppend(parts: {
-  makerMemoryRules?: string;
-  ghostRosterPrompt?: string;
-  hostSystemPrompt?: string;
-  makerMemoryIndex?: string;
-  botProfilePrompt?: string;
-  botProfileContextPrompt?: string;
-  botUserProfilePrompt?: string;
-  userPrompt?: string;
-  answerDeliveryPrompt?: string;
-  /** 设备托管：项目在哪台电脑、文件与命令工具是哪些。 */
-  deviceHostedNote?: string;
-}): string {
-  return [
-    parts.botProfilePrompt,
-    parts.answerDeliveryPrompt,
-    MAKER_SYSTEM_PROMPT_APPEND,
-    parts.deviceHostedNote,
-    parts.makerMemoryRules,
-    parts.ghostRosterPrompt,
-    parts.botProfileContextPrompt,
-    parts.hostSystemPrompt,
-    parts.makerMemoryIndex,
-    parts.botUserProfilePrompt,
-    parts.userPrompt,
-  ]
-    .filter((part): part is string => !!part && part.trim().length > 0)
-    .join('\n\n');
-}
+export { buildClaudeSystemPromptAppend } from './system-prompt-append.js';
 
 /**
  * 公开短 ID → Claude SDK 实际接受的字符串。
@@ -1775,12 +1743,6 @@ export class ClaudeCodeAgent extends BaseAgent {
       debugNet: env.ANTHROPIC_LOG ? `on (ANTHROPIC_LOG=${env.ANTHROPIC_LOG})` : 'off',
     });
 
-    // ── Maker Memory: 启动时预拉 MEMORY.md 索引 + 写入规范段 ────────────────
-    // 跟 userPrompt 同语义 — 启动时快照, rewind 重启时仍用本快照, 跨 session 不实时同步。
-    // 失败 (manager 没注入 / store init 抛错) 静默跳过, agent 仍能跑。
-    let makerMemoryRules = '';
-    let makerMemoryIndex = '';
-    let memoryFlushController: MemoryFlushController | null = null;
     let mutableModel = opts.model;
     let mutableProviderId = opts.providerId ?? null;
     const getAutoCompactThresholdPct = (
@@ -1799,44 +1761,8 @@ export class ClaudeCodeAgent extends BaseAgent {
             getThresholdPct: getAutoCompactThresholdPct,
             compactWhenFull: Boolean(opts.remoteHostId),
           });
-    // opts.makerMemoryEnabled 优先 (per-session, renderer 透传); fallback 到 runtimeConfig
-    // (host 静态配置, 一般 undefined)。manager 没注入视为禁用。
-    const makerMemoryFlag = reviewMode
-      ? false
-      : opts.makerMemoryEnabled ?? this.deps.runtimeConfig.makerMemoryEnabled ?? false;
-    const makerMemory = this.deps.makerMemory;
-    const makerMemoryEnabled = makerMemoryFlag === true && !!makerMemory;
-    // SSH remote 的 workingDir 是远端路径 — store 定位统一经 scope key;
-    // 本地会话额外做 git worktree 归一化 (#2379)。已注入的 makerMemoryScopeKey
-    // (含 bot:) 原样透传。Maker Memory 关闭时跳过 git 探测 (Codex #2399 P1):
-    // 解析结果本就不会被用, 失败还能空耗 3s timeout。
-    const memoryScopeKey = makerMemoryEnabled
-      ? (opts.makerMemoryScopeKey ?? (await resolveMemoryScopeKey(opts.workingDir, opts.remoteHostId)))
-      : (opts.makerMemoryScopeKey ?? opts.workingDir);
-    // This per-session injection flag must not mutate the shared manager.
-    if (makerMemoryEnabled && makerMemory) {
-      try {
-        // 设备托管：记忆在任务所在电脑上，只用随启动选项带来的快照，不打开本机记忆库。
-        const store = hosted ? null : await makerMemory.getStore(memoryScopeKey);
-        makerMemoryRules = opts.makerMemoryScopeKey?.startsWith('bot:')
-          ? ''
-          : MAKER_MEMORY_RULES;
-        makerMemoryIndex = opts.makerMemoryIndexSnapshot ?? (store ? await store.getIndex() : '');
-        memoryFlushController = new MemoryFlushController({
-          logger: log.child('memory-flush'),
-          workdir: memoryScopeKey,
-          agentKind: 'claude-code',
-        });
-        log.debug('maker memory loaded for session', {
-          rulesBytes: makerMemoryRules.length,
-          indexBytes: makerMemoryIndex.length,
-        });
-      } catch (e) {
-        log.warn('maker memory load failed at session start (skipping injection)', {
-          error: String(e),
-        });
-      }
-    }
+    const makerMemoryEnabled = false;
+    const memoryScopeKey = opts.makerMemoryScopeKey ?? opts.workingDir;
 
     const mcpProviders = reviewMode ? [] : this.deps.mcpProviders ?? [];
     // host-owned 只读白名单在 session 启动时快照; 与 hooks / MCP 注册同样保持整条
@@ -3906,15 +3832,8 @@ export class ClaudeCodeAgent extends BaseAgent {
           systemPrompt: (() => {
             const appendText = buildClaudeSystemPromptAppend({
               answerDeliveryPrompt: reviewMode ? undefined : this.deps.runtimeConfig.answerDeliveryPrompt,
-              makerMemoryRules,
               ghostRosterPrompt,
               hostSystemPrompt,
-              makerMemoryIndex,
-              botProfilePrompt: reviewMode ? undefined : opts.botProfilePrompt,
-              botProfileContextPrompt:
-                reviewMode ? undefined : opts.botProfileContextPrompt,
-              botUserProfilePrompt: reviewMode ? undefined : opts.botUserProfilePrompt,
-              userPrompt: reviewMode || opts.botRuntimeProfile ? undefined : opts.userPrompt,
               ...(hosted ? { deviceHostedNote: deviceHostedClaudeNote(hosted, opts.workingDir) } : {}),
             });
             return {
@@ -4463,31 +4382,11 @@ export class ClaudeCodeAgent extends BaseAgent {
           includePartialMessages: true,
           ...thinkingOpts,
           pathToClaudeCodeExecutable: binaryPath,
-          // systemPrompt 八段拼接(含 SDK 内嵌 preset)— SDK 先输出 preset, 再追加 append 字段。
-          //   [1] cc preset                  — Claude SDK 自带 (内嵌不可见)
-          //   [2] opts.botProfilePrompt      — Bot SOUL identity only (main/DB authority)
-          //   [3] MAKER_SYSTEM_PROMPT_APPEND — maker engine (system-prompt-append.md)
-          //   [4] makerMemoryRules           — maker memory 写入规范 (条件式: makerMemoryEnabled
-          //                                    且 manager 注入成功才注入)
-          //   [5] opts.botProfileContextPrompt — stable active-profile marker, kept outside SOUL
-          //   [6] hostSystemPrompt           — host runtime (runtimeConfig.systemPrompt)
-          //   [7] makerMemoryIndex           — 当前 workdir MEMORY.md 内容 (条件式, 紧邻 userPrompt
-          //                                    高优先级, 启动时快照 — 跟 userPrompt 同语义)
-          //   [8] opts.userPrompt            — per-call 用户级 (renderer 本地 storage,
-          //                                    每次 startSession 透传, 优先级最高)
-          // 空段被 .filter 跳过 (.md 文件为空 / userPrompt 为空 = 不 append).
           systemPrompt: (() => {
             const appendText = buildClaudeSystemPromptAppend({
               answerDeliveryPrompt: reviewMode ? undefined : this.deps.runtimeConfig.answerDeliveryPrompt,
-              makerMemoryRules,
               ghostRosterPrompt,
               hostSystemPrompt,
-              makerMemoryIndex,
-              botProfilePrompt: reviewMode ? undefined : opts.botProfilePrompt,
-              botProfileContextPrompt:
-                reviewMode ? undefined : opts.botProfileContextPrompt,
-              botUserProfilePrompt: reviewMode ? undefined : opts.botUserProfilePrompt,
-              userPrompt: reviewMode || opts.botRuntimeProfile ? undefined : opts.userPrompt,
               ...(hosted ? { deviceHostedNote: deviceHostedClaudeNote(hosted, opts.workingDir) } : {}),
             });
             return {
@@ -5923,15 +5822,13 @@ export class ClaudeCodeAgent extends BaseAgent {
                 // 归零立即 arm: ball 回上游, 不等下一条 SDK message 起表 (会留 idle 窗口)。
                 if (pendingToolIds.size === 0) armUpstreamResponseIdle();
               },
-              ...(memoryFlushController || autoCompactController
+              ...(autoCompactController
                 ? {
                     onUsageUpdate: (used, window) => {
-                      memoryFlushController?.onUsageUpdate(used, window);
                       autoCompactController?.onUsageUpdate(used, window);
                     },
                     onCompactBoundary: () => {
                       hostAutoCompactInFlight = false;
-                      memoryFlushController?.onCompactBoundary();
                       autoCompactController?.onCompactBoundary();
                     },
                   }

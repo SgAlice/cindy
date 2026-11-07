@@ -240,7 +240,7 @@ describe('model source second line', () => {
     expect(screen.getByText(quotaText('2小时 60%'))).toBeTruthy();
     expect(screen.getByText(quotaText('2小时 10%'))).toBeTruthy();
     expect(screen.getByText(quotaText('1小时 39%'))).toBeTruthy();
-    expect(screen.getByText('claude · Pro')).toBeTruthy();
+    expect(screen.queryByText('claude · Pro')).toBeNull();
     expect(screen.getAllByText('account-a · Plus')).toHaveLength(2);
     expect(reads.remoteCodex).toHaveBeenCalledWith('device-1', 'account-a', { live: true, web: true });
     expect(reads.codex.mock.calls.some(([enabled]) => enabled)).toBe(false);
@@ -299,7 +299,7 @@ describe('model source second line', () => {
     expect(screen.getByText(quotaText('1小时 39%'))).toBeTruthy();
     expect(screen.queryByText('account-a · Pro')).toBeNull();
   });
-  it('uses Claude model-scoped weekly quota and keeps unknown reset times honest', () => {
+  it('does not display cached Claude subscription quota', () => {
     reads.claudeSnapshot = {
       subscriptionType: 'max',
       fiveHour: { utilization: 95 },
@@ -318,11 +318,11 @@ describe('model source second line', () => {
         {details('claude', 'claude-opus-5')}
       </ModelSourceUsageProvider>,
     );
-    expect(screen.getByText('claude · Max')).toBeTruthy();
-    expect(screen.getByText(quotaText('— 5%'))).toBeTruthy();
+    expect(screen.queryByText('claude · Max')).toBeNull();
+    expect(screen.queryByText(quotaText('— 5%'))).toBeNull();
     expect(screen.queryByText(/20%/)).toBeNull();
     expect(container.querySelector('[data-model-source-details]')?.getAttribute('title')).toBe(
-      'claude · Max · 剩余 5% · 2天 · 剩余 20%',
+      'claude',
     );
   });
   it('caps countdowns at the window length right after a reset, except xAI', () => {
@@ -359,7 +359,7 @@ describe('model source second line', () => {
     );
     expect(screen.getByText(quotaText('5小时 50%'))).toBeTruthy();
     // Claude 两窗口同为 0% 已用,后一个(周限)胜出
-    expect(screen.getByText(quotaText('7天 100%'))).toBeTruthy();
+    expect(screen.queryByText(quotaText('7天 100%'))).toBeNull();
     expect(screen.getByText(quotaText('25天 100%'))).toBeTruthy();
     expect(screen.queryByText(/8天|6小时/)).toBeNull();
   });

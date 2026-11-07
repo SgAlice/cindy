@@ -1,6 +1,5 @@
 /** Cached-first Claude subscription quota; Main owns account identity and expiry. */
 import type { ClaudeSubscriptionUsageSnapshot } from '../../shared/claudeSubscriptionUsage';
-import { createSubscriptionUsageCache } from './subscriptionUsageCache';
 export type { ClaudeSubscriptionUsageSnapshot };
 
 function isSnapshot(v: unknown): v is ClaudeSubscriptionUsageSnapshot {
@@ -28,33 +27,13 @@ export function resolvePersistedClaudeSubscriptionRead(
   return { action: 'ignore' };
 }
 
-const caches = new Map<
-  string,
-  ReturnType<typeof createSubscriptionUsageCache<ClaudeSubscriptionUsageSnapshot>>
->();
-function usageCache(providerId: string) {
-  let cache = caches.get(providerId);
-  if (!cache) {
-    cache = createSubscriptionUsageCache<ClaudeSubscriptionUsageSnapshot>(() => ({
-      read: window.electronAPI?.maker?.usage?.getClaudeSubscription
-        ? () => window.electronAPI.maker.usage.getClaudeSubscription(providerId)
-        : undefined,
-      subscribe: window.electronAPI?.maker?.usage?.onClaudeSubscriptionChanged
-        ? (cb) => window.electronAPI.maker.usage.onClaudeSubscriptionChanged(cb, providerId)
-        : undefined,
-    }));
-    caches.set(providerId, cache);
-  }
-  return cache;
-}
-
-export function requestClaudeSubscriptionRefresh(providerId = 'anthropic'): void {
-  usageCache(providerId).refresh();
+export function requestClaudeSubscriptionRefresh(_providerId = 'anthropic'): void {
+  return;
 }
 
 export function useClaudeSubscriptionUsage(
-  enabled: boolean,
-  providerId = 'anthropic',
+  _enabled: boolean,
+  _providerId = 'anthropic',
 ): ClaudeSubscriptionUsageSnapshot | null {
-  return usageCache(providerId).useSnapshot(enabled);
+  return null;
 }

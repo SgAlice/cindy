@@ -8,10 +8,8 @@ import { cleanProcessEnv, type AuthState } from '@cindy/maker-core';
 import { getReadyBinaryPath } from '../agent-binaries/index.js';
 import {
   refreshClaudeCliLoginStatus,
-  readClaudeCliPlanUsage,
   runClaudeCliLogin,
 } from '../maker-host/claude-native-cli.js';
-import { parseClaudeOAuthUsageResponse } from '../../shared/claudeSubscriptionUsage.js';
 import { providerGroupCodexUsageFromReads } from '../provider-group/usage.js';
 import type { SubscriptionProvider } from '../../shared/subscriptionAccounts.js';
 
@@ -80,14 +78,7 @@ export async function readNativeAccount(
 }
 
 export async function readNativeAccountUsage(provider: SubscriptionProvider, directory: string) {
-  if (provider === 'anthropic') {
-    const usage = await readClaudeCliPlanUsage(
-      directory === path.join(homedir(), '.claude') ? undefined : directory,
-    );
-    return {
-      claudeUsage: usage ? parseClaudeOAuthUsageResponse(usage.rateLimits, Date.now()) : null,
-    };
-  }
+  if (provider === 'anthropic') return { claudeUsage: null };
   const rateLimits = await codexAccountRpc(directory, 'account/rateLimits/read', {});
   return {
     codexUsage: providerGroupCodexUsageFromReads(null, rateLimits, Date.now()),

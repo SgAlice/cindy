@@ -20,12 +20,12 @@ export function providerWeeklyQuotaSource(
   )
     return null;
   if (provider.id === 'openai' || provider.auth.native === 'codex') return 'codex';
-  if (provider.auth.native === 'claude') return 'claude';
+  if (provider.auth.native === 'claude') return null;
   if (provider.auth.native === 'xai') return 'xai';
   // These APIs currently describe only the built-in native account, not any
   // arbitrary same-brand API/OAuth connection a user may add.
   if (provider.source !== 'builtin') return null;
-  if (provider.id === 'anthropic') return 'claude';
+  if (provider.id === 'anthropic') return null;
   if (provider.id === 'xai') return 'xai';
   return null;
 }

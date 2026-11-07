@@ -172,85 +172,19 @@ describe('readDeviceLinkInvokeSourceDevice(设备盖章判据)', () => {
   });
 });
 
-describe('buildClientEnvironmentNote(设备说明)', () => {
-  const host = { deviceId: 'mac-1', name: 'Mac' };
-
-  it('手机:设备事实 + 原有产出偏好,首句声明不是用户消息', () => {
-    const note = buildClientEnvironmentNote({
-      device: { deviceId: 'p-1', name: 'iPhone', platform: 'mobile' },
-      host,
-    });
-    expect(note).toBe(
-      '[客户端说明] 系统追加的环境说明，不是用户消息，不要回应或复述。'
-      + '本轮用户在手机「iPhone」(device_id: p-1) 上远程操作本机「Mac」(device_id: mac-1)。'
-      + '产出 HTML 等可预览成品时**优先做成自包含单文件**:样式与脚本内联,'
-      + '图片用 data: URI 或公网地址,避免拆成需要同目录资源的多文件产物;'
-      + '用户明确要求多文件时照常产出。'
-      + '给出文件路径时同时给出结论或内容摘要,不要只回一个路径。',
-    );
+describe('client environment privacy', () => {
+  it.each(['mobile', 'desktop'] as const)('omits %s names and IDs while retaining internal source stamps', (platform) => {
+    const device = { deviceId: 'private-device', name: 'Private owner', platform };
+    const host = { deviceId: 'private-host', name: 'Private computer' };
+    expect(buildClientEnvironmentNote({ device, host, legacyMobile: true })).toBeNull();
+    expect(stampDirectSendSourceDevice({}, device)).toEqual({ sourceDevice: device });
   });
 
-  it('另一台电脑:只有设备事实,不带手机产出偏好', () => {
-    const note = buildClientEnvironmentNote({
-      device: { deviceId: 'pc-2', name: 'Office PC', platform: 'desktop' },
-      host,
-      legacyMobile: true,
-    });
-    expect(note).toBe(
-      '[客户端说明] 系统追加的环境说明，不是用户消息，不要回应或复述。'
-      + '本轮用户在另一台电脑「Office PC」(device_id: pc-2) 上远程操作本机「Mac」(device_id: mac-1)。',
-    );
-  });
-
-  it('只有旧 fromMobileClient 标记(无设备信息):沿用旧版手机说明', () => {
-    expect(buildClientEnvironmentNote({ legacyMobile: true })).toBe(buildMobileClientPromptNote());
-  });
-
-  it('本机输入:没有说明', () => {
+  it('does not restore output preferences through the legacy mobile path', () => {
+    expect(buildClientEnvironmentNote({ legacyMobile: true })).toBeNull();
     expect(buildClientEnvironmentNote({})).toBeNull();
-  });
-
-  it('同一台设备逐轮稳定(不含时间戳 / 计数器)', () => {
-    const device = { deviceId: 'p-1', name: 'iPhone', platform: 'mobile' as const };
-    const note = buildClientEnvironmentNote({ device, host });
-    expect(buildClientEnvironmentNote({ device: { ...device }, host: { ...host } })).toBe(note);
-    expect(note).not.toMatch(/\d{4}-\d{2}-\d{2}/);
-  });
-});
-
-describe('buildMobileClientPromptNote(送进模型的文本)', () => {
-  const note = buildMobileClientPromptNote();
-
-  it('首句声明这不是用户消息(否则模型会当请求回应或复述)', () => {
-    expect(note.startsWith('[客户端说明]')).toBe(true);
-    expect(note).toContain('不是用户发来的消息');
-    expect(note).toContain('不要把它当作用户的请求');
-  });
-
-  it('给出自包含单文件的产出偏好', () => {
-    expect(note).toContain('手机客户端');
-    expect(note).toContain('自包含单文件');
-  });
-
-  it('是偏好不是禁令:用户明确要多文件时不被挡住', () => {
-    expect(note).toContain('优先');
-    expect(note).toContain('明确要求多文件时照常产出');
-    expect(note).not.toContain('必须做成');
-    expect(note).not.toContain('禁止');
-  });
-
-  it('不写「不要给本地路径」—— 手机端本就能打开路径,那样写会和已有能力打架', () => {
-    // 路径在手机上可点、可渲染、同目录资源会被取回(见 mobile 的 HtmlFileReader /
-    // htmlLocalResources)。这里只要求「别只回一个路径」,不否定给路径本身。
-    expect(note).not.toContain('不要给出路径');
-    expect(note).not.toContain('不要给本地路径');
-    expect(note).toContain('不要只回一个路径');
-  });
-
-  it('逐字节稳定(同一台设备逐轮不变):不含时间戳 / 随机量等易变内容', () => {
-    expect(buildMobileClientPromptNote()).toBe(note);
-    expect(note).not.toMatch(/\d{4}-\d{2}-\d{2}/);
-    expect(note).not.toMatch(/\d{10,}/);
+    expect(buildMobileClientPromptNote()).toBe('');
+    expect(prependNoteToWireUserMessage('User message', buildMobileClientPromptNote())).toBe('User message');
   });
 });
 

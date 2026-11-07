@@ -28,11 +28,12 @@ const strategies: ProviderGroupStrategy[] = ['least', 'round', 'order', 'weight'
 /** `defaultUsage` is the provider's existing usage card; it belongs to the CLI default account. */
 export function SubscriptionAccountsSection({
   providerId,
-  defaultUsage,
+  defaultUsage: suppliedDefaultUsage,
 }: {
   providerId: SubscriptionProvider;
   defaultUsage?: ReactNode;
 }) {
+  const defaultUsage = providerId === 'anthropic' ? undefined : suppliedDefaultUsage;
   const { t, i18n } = useTranslation();
   const locale = i18n?.resolvedLanguage ?? i18n?.language;
   const accountSetting = useSettingDefinition(providersSettings.subscriptionAccounts);
@@ -68,12 +69,12 @@ export function SubscriptionAccountsSection({
     };
     window.addEventListener('focus', focus);
     // Account usage refreshes behind a short host cache; keep windows and reset times current.
-    const timer = window.setInterval(focus, 60_000);
+    const timer = providerId === 'anthropic' ? undefined : window.setInterval(focus, 60_000);
     return () => {
       ++epoch.current;
       unsubscribe();
       window.removeEventListener('focus', focus);
-      window.clearInterval(timer);
+      if (timer !== undefined) window.clearInterval(timer);
       if (login.current)
         void window.electronAPI.subscriptionAccounts
           .command({ action: 'cancel', providerId, loginKey: login.current })
@@ -178,7 +179,9 @@ export function SubscriptionAccountsSection({
             {view.accounts.map((account, index) => {
               const name =
                 account.identity || t('providerGroup.member.accountFallback', { index: index + 1 });
-              const usage = buildSubscriptionAccountUsageCard(account.usage, t, Date.now(), locale);
+              const usage = providerId === 'anthropic'
+                ? null
+                : buildSubscriptionAccountUsageCard(account.usage, t, Date.now(), locale);
               const status = account.paused
                 ? t('providerGroup.member.status.paused')
                 : t(

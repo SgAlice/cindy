@@ -572,13 +572,13 @@ describe('ClaudeCodeAgent plan mode', () => {
     await handle.close();
   });
 
-  it('keeps Bot identity and native tools under ordinary task permissions', async () => {
+  it('omits Bot identity without changing native task permissions', async () => {
     const { handle, queryOptions, fakeQuery } = await startPlanSession(
       false, {}, 'bypassPermissions', false, true,
     );
     expect(queryOptions.permissionMode).toBe('bypassPermissions');
     expect(queryOptions.allowDangerouslySkipPermissions).toBe(true);
-    expect(queryOptions.systemPrompt?.append).toContain('BOT SOUL');
+    expect(queryOptions.systemPrompt?.append ?? '').not.toContain('BOT SOUL');
     for (const toolName of ['Write', 'Bash']) {
       for (const group of queryOptions.hooks?.PreToolUse ?? []) {
         for (const hook of group.hooks) {

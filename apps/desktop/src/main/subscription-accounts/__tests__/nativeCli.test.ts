@@ -24,15 +24,20 @@ vi.mock('@cindy/maker-core', () => ({
 vi.mock('../../agent-binaries/index.js', () => ({ getReadyBinaryPath: () => h.binary }));
 vi.mock('../../maker-host/claude-native-cli.js', () => ({
   refreshClaudeCliLoginStatus: vi.fn(),
-  readClaudeCliPlanUsage: vi.fn(),
   runClaudeCliLogin: vi.fn(),
 }));
 import {
   codexAccountRpc,
   readNativeAccount,
+  readNativeAccountUsage,
   loginNativeAccount,
   readNativeCodexTokens,
 } from '../nativeCli.js';
+
+it('does not launch a CLI or read credentials for Claude account quota', async () => {
+  await expect(readNativeAccountUsage('anthropic', '/unreadable-private-profile')).resolves.toEqual({ claudeUsage: null });
+  expect(h.spawn).not.toHaveBeenCalled();
+});
 
 const children: (EventEmitter & {
   stdin: EventEmitter & { write: ReturnType<typeof vi.fn> };

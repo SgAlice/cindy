@@ -8802,6 +8802,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
    * 副作用：mutate o.userPrompt（追加按需读取 TOC 的短 wrapper）；返回是否真的注入了入口。
    */
   async function applyProjectContextInjection(o: CreateOpts): Promise<boolean> {
+    if (o.agentKind === 'claude-code') return false;
     if (!o.workingDir) return false;
     // remote session: workingDir 是远端主机上的路径。本机若恰好存在同路径且带
     // .cindy/project-knowledge/,tryInjectProjectContext 会把**本机**的项目知识注入给

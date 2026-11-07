@@ -469,7 +469,7 @@ export class QuotaOverviewService {
       locale,
       moneySymbol: currentLedgerCurrency() === 'CNY' ? '¥' : '$',
       settings: this.currentSettings,
-      sources: collected.sources,
+      sources: collected.sources.filter((source) => source.kind !== 'subscription' || source.family !== 'claude'),
       tasks: collected.tasks,
       usage: collected.usage,
       updatedAtMs: collected.updatedAtMs,

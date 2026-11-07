@@ -363,8 +363,8 @@ describe('Claude Code mounts the Bot\'s own learned Skills', () => {
   it('keeps global Cindy identity, roster, and user prompt out of Bot context', async () => {
     const options = await startBotSession({});
     const prompt = options.systemPrompt?.append ?? '';
-    expect(prompt).toContain('BOT SOUL');
-    expect(prompt).toContain('BOT HOME CONTEXT');
+    expect(prompt).not.toContain('BOT SOUL');
+    expect(prompt).not.toContain('BOT HOME CONTEXT');
     expect(prompt).not.toContain('GLOBAL CINDY HOST PROMPT');
     expect(prompt).not.toContain('GLOBAL GHOST ROSTER');
     expect(prompt).not.toContain('GLOBAL USER PROMPT');

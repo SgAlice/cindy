@@ -6,13 +6,15 @@
  * handler 时拉起 Electron / runtime config 副作用。
  */
 
+export { triggerClaudeSubscriptionUsageRefresh, syncClaudeSubscriptionUsageForAuthChange, readClaudeSubscriptionUsageSnapshotForDeviceLink } from '../usage/claudeSubscriptionUsageRefresh.js';
+import { readClaudeSubscriptionUsageSnapshotForDeviceLink } from '../usage/claudeSubscriptionUsageRefresh.js';
+
 import type { MobileCodexRateLimitsResult } from '@cindy/maker-shared/device-link-contract';
 import type { XaiSubscriptionUsageSnapshot } from '../../shared/xaiSubscriptionUsage.js';
-import { createHash } from 'node:crypto';
 import { readSubscriptionAccountUsage, triggerSubscriptionAccountUsage, syncSubscriptionAccountUsage, setSubscriptionAccountUsageBroadcaster } from '../usage/subscriptionAccountUsage.js';
 import { broadcastSubscriptionAccountUsage, clearXaiRateLimitSnapshot } from '../usageBroadcaster.js';
 import { subscriptionAccountKind } from '../maker-host/subscription-account-auth.js';
-import { setClaudeRateLimitInfoListener, type Maker } from '@cindy/maker-core';
+import type { Maker } from '@cindy/maker-core';
 import { createLogger } from '../logger.js';
 import { assertTrustedAppRendererEvent } from '../security/trustedAppRenderer.js';
 import {
@@ -20,11 +22,6 @@ import {
   readClaudeAccountQuotaClear,
   triggerClaudeAccountUsageRefresh,
 } from '../usage/claudeAccountUsage.js';
-import {
-  parseClaudeOAuthUsageResponse,
-  parseClaudeSdkRateLimitInfo,
-} from '../../shared/claudeSubscriptionUsage.js';
-import { createClaudeSubscriptionUsageReader } from '../usage/claudeSubscriptionUsageRefresh.js';
 import {
   XaiSubscriptionUsageRateLimitedError,
   XaiSubscriptionUsageUnauthorizedError,
@@ -57,24 +54,17 @@ import { getCurrentDbClientUserId } from '../localDb/client/current.js';
 import { getSelfDeviceId, remoteBackgroundInvoke } from '../device-link/index.js';
 import { handleListDevices, defaultDeps as deviceDirectoryDeps } from '../device-link/ipc.js';
 import {
-  clearClaudeSubscriptionUsageSnapshot,
   clearCodexAccountUsageSnapshot,
   clearXaiSubscriptionUsageSnapshot,
   readAgentTodayUsage,
-  readClaudeSubscriptionUsageSnapshot,
   readCodexAccountUsageSnapshot,
   readXaiSubscriptionUsageSnapshot,
-  recordClaudeSubscriptionUsageSnapshot,
   recordCodexAccountUsageSnapshot,
   recordXaiSubscriptionUsageSnapshot,
 } from '../usageBroadcaster.js';
 import { activeOwnerScopeKey, isAppSessionBoundaryPending } from '../appSessionState.js';
 import { isOpenAiSubscriptionProviderId } from '../maker-host/codex-account-auth.js';
 import { desktopCodexAuthAdapter } from '../maker-host/auth-adapters.js';
-import { hasClaudeNativeLogin } from '../maker-host/claude-native-auth.js';
-import { peekClaudeCliLoginStatus } from '../maker-host/claude-native-cli-status.js';
-import { readClaudeCliPlanUsage } from '../maker-host/claude-native-cli.js';
-import { observeSubscriptionAccountUsage } from '../subscription-accounts/runtime.js';
 import { getGrokAccessToken, hasGrokOAuthLogin } from '../maker-host/grok-oauth-login.js';
 import { outboundFetch } from '../maker-host/outbound-fetch.js';
 import { CodexResetAutoUse, parseCodexResetAutoUse } from '../usage/codexResetAutoUse.js';
@@ -87,65 +77,6 @@ import { createElectronIpcHandlerRegistry } from './electronIpcRegistry.js';
 import { registerMakerUsageHandlers } from './usageHandlers.js';
 
 const log = createLogger('maker-ipc:usage');
-
-/**
- * 当前 Claude 账号的快照归属指纹(CLI 登录邮箱的 sha256 截断,不含邮箱原文)。同机在
- * CLI 里换号时据此丢弃上一个账号的持久化快照。未登录 / CLI 没报邮箱时为 null。
- */
-function currentClaudeAccountFingerprint(): string | null {
-  const email = peekClaudeCliLoginStatus()?.email;
-  return email ? createHash('sha256').update(`claude-usage:${email}`).digest('hex').slice(0, 16) : null;
-}
-
-/**
- * 内置 Claude 订阅的余量 reader。订阅会话由内置 CLI 用自己的登录直连 Anthropic,Cindy
- * 不持有订阅 token。完整余量(5h / 周 / 分模型周限 / extra usage)由 CLI 的 `get_usage`
- * 控制请求查询(CLI 自己发请求,节流 / 退避在 reader 内部);会话里 CLI 上报的 SDK
- * `rate_limit_event`(见 registerMakerUsageIpc 的 setClaudeRateLimitInfoListener)按
- * headers 源口径增量合并,补 turn 内的实时性。
- */
-const claudeSubscriptionUsageReader = createClaudeSubscriptionUsageReader({
-  readAccount: () => (hasClaudeNativeLogin() ? currentClaudeAccountFingerprint() ?? '' : null),
-  fetchSnapshot: async () => {
-    const usage = await readClaudeCliPlanUsage();
-    if (!usage) return 'empty';
-    const snapshot = parseClaudeOAuthUsageResponse(usage.rateLimits, Date.now());
-    // get_usage 是 Experimental:解析不出窗口按形状变化处理,抛错退避并保留已有缓存。
-    if (!snapshot) throw new Error('claude get_usage returned unrecognized rate_limits');
-    const subscriptionType = usage.subscriptionType ?? peekClaudeCliLoginStatus()?.subscriptionType;
-    return subscriptionType ? { ...snapshot, subscriptionType } : snapshot;
-  },
-  recordSnapshot: recordClaudeSubscriptionUsageSnapshot,
-  clearSnapshot: clearClaudeSubscriptionUsageSnapshot,
-  readCachedSnapshot: readClaudeSubscriptionUsageSnapshot,
-  now: () => Date.now(),
-  onRefreshError: (err) => {
-    log.warn('claude subscription usage refresh failed:', err instanceof Error ? err.message : String(err));
-  },
-});
-
-/**
- * Claude turn done 后的订阅余量刷新钩子 (register.ts 消费) —— fire-and-forget,
- * 节流 / 429 退避在 reader 内部。未连订阅时 no-op。
- */
-export function triggerClaudeSubscriptionUsageRefresh(providerId?: string): void {
-  if (providerId && providerId !== 'anthropic') { triggerSubscriptionAccountUsage(providerId); return; }
-  claudeSubscriptionUsageReader.triggerRefresh();
-}
-
-/**
- * Claude 订阅登录态变化(CLI 登录 / 登出 / 换号 / Cindy 断开)后的余量同步钩子(bootstrap
- * 的 CLAUDE_OAUTH_LOGIN / LOGOUT handler 与 CLI 登录态监听消费):
- *   - 未连接 → 清快照并广播 null(chip 立即回占位态);
- *   - 登录 / 换号 → 指纹校验清掉旧账号快照,并经 CLI `get_usage` 拉取新账号余量。
- * renderer 不需要感知 auth 事件, 全靠既有 usage:claude-subscription-changed push。
- */
-export function syncClaudeSubscriptionUsageForAuthChange(providerId?: string): void {
-  if (providerId && providerId !== 'anthropic') { void syncSubscriptionAccountUsage(providerId); return; }
-  void claudeSubscriptionUsageReader.syncForCredentialChange().catch(() => {
-    /* reader 内部已把错误交给 onRefreshError, 这里只兜底 promise 拒绝。 */
-  });
-}
 
 async function readXaiCredentialsInfo(): Promise<{ accessToken: string } | null> {
   if (!hasGrokOAuthLogin()) return null;
@@ -195,12 +126,6 @@ export async function readXaiSubscriptionUsageSnapshotForDeviceLink(providerId?:
   if (!providerId || providerId === 'xai') return xaiSubscriptionUsageReader.read();
   if (subscriptionAccountKind(providerId) !== 'xai') return null;
   return await readSubscriptionAccountUsage(providerId) as XaiSubscriptionUsageSnapshot | null;
-}
-
-export async function readClaudeSubscriptionUsageSnapshotForDeviceLink(providerId?: string, options?: { fresh?: boolean }): Promise<import('../../shared/claudeSubscriptionUsage.js').ClaudeSubscriptionUsageSnapshot | null> {
-  if (!providerId || providerId === 'anthropic') return claudeSubscriptionUsageReader.read(options);
-  if (subscriptionAccountKind(providerId) !== 'claude') return null;
-  return await readSubscriptionAccountUsage(providerId) as import('../../shared/claudeSubscriptionUsage.js').ClaudeSubscriptionUsageSnapshot | null;
 }
 
 /** SuperGrok 登录 / 登出 / 换号后强制同步(先清再拉)。调用方应 await 后再广播连接态。 */
@@ -428,22 +353,6 @@ export function registerMakerUsageIpc(maker: Maker): void {
       writePeerUsageCacheFile(peerUsageCacheFilePath(app.getPath('userData'), userId), contents),
     now: () => Date.now(),
   }));
-
-  // 订阅会话的 CLI 在会话里上报 SDK rate_limit_event → 落库 + 广播(maker-core 只对本机
-  // Claude 订阅会话转发)。事件晚于登出 / 断开到达时丢弃,不复活刚清掉的快照。
-  setClaudeRateLimitInfoListener((info, account) => {
-    if (account) { observeSubscriptionAccountUsage(account, info); return; }
-    if (!hasClaudeNativeLogin()) return;
-    const snapshot = parseClaudeSdkRateLimitInfo(info, Date.now());
-    if (!snapshot) return;
-    const fingerprint = currentClaudeAccountFingerprint();
-    const subscriptionType = peekClaudeCliLoginStatus()?.subscriptionType;
-    void recordClaudeSubscriptionUsageSnapshot({
-      ...snapshot,
-      ...(fingerprint ? { accountFingerprint: fingerprint } : {}),
-      ...(subscriptionType ? { subscriptionType } : {}),
-    });
-  });
 
   log.info('maker usage IPC handlers registered');
 }

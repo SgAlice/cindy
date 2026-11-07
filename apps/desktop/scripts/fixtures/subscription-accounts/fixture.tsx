@@ -2,12 +2,30 @@ import { mountPage, subscription } from '../../ui-page/harness';
 import { SubscriptionAccountsSection } from '../../../src/renderer/components/settings/SubscriptionAccountsSection';
 import type {
   SubscriptionAccountCommand,
+  SubscriptionAccountUsage,
   SubscriptionPoolView,
 } from '../../../src/shared/subscriptionAccounts';
 
 void mountPage({
   host: (ctx) => {
     const providerId = ctx.case === 'codex' ? 'openai' : 'anthropic';
+    const accountUsage = (usedPercent: number, windowMinutes: number): SubscriptionAccountUsage =>
+      providerId === 'openai'
+        ? {
+            codex: {
+              buckets: {
+                codex: {
+                  limitId: 'codex',
+                  limitName: null,
+                  updatedAt: Date.now(),
+                  primary: { usedPercent, resetsAt: 1794096000, windowMinutes },
+                  secondary: null,
+                },
+              },
+              credits: null,
+            },
+          }
+        : { claude: { fiveHour: { utilization: usedPercent, resetsAt: 1794096000 } } };
     let view: SubscriptionPoolView = {
       providerId,
       configured: true,
@@ -23,7 +41,7 @@ void mountPage({
           limit: 4,
           weight: 1,
           paused: false,
-          quota: { usedPercent: 28, resetAtMs: 1794096000000, windowMs: 604800000 },
+          usage: accountUsage(28, 10080),
         },
         {
           id: 'second',
@@ -35,7 +53,7 @@ void mountPage({
           limit: 2,
           weight: 3,
           paused: false,
-          quota: { usedPercent: 100, resetAtMs: 1794096000000, windowMs: 18000000 },
+          usage: accountUsage(100, 300),
         },
         {
           id: 'third',
@@ -47,7 +65,7 @@ void mountPage({
           limit: 4,
           weight: 1,
           paused: true,
-          quota: { usedPercent: 62, resetAtMs: 1794096000000, windowMs: 604800000 },
+          usage: accountUsage(62, 10080),
         },
       ],
     };

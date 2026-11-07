@@ -1237,7 +1237,7 @@ describe('createContextOverflowRollover', () => {
       expect(deps.setPendingHandoff).not.toHaveBeenCalled();
     });
 
-    it('preserves shared-member and device source notes on cache recovery', async () => {
+    it('preserves shared-member attribution without device identity on cache recovery', async () => {
       const source = msg('user', 'original text', 'u1', 1);
       source.agentMeta = { sharedTaskAuthor: { memberId: 'm-1', displayName: '张三' }, sourceDevice: { deviceId: 'phone-1', name: 'iPhone', platform: 'mobile' } };
       const deps = makePiDeps([source]);
@@ -1247,8 +1247,8 @@ describe('createContextOverflowRollover', () => {
       const call = deps.replayUserMessage.mock.calls[0];
       expect(call?.[1]).toBe('original text');
       expect(JSON.stringify(call?.[2])).toContain('本条由共享任务成员「张三」');
-      expect(JSON.stringify(call?.[2])).toContain('[客户端说明]');
-      expect(JSON.stringify(call?.[2])).toContain('phone-1');
+      expect(JSON.stringify(call?.[2])).not.toContain('[客户端说明]');
+      expect(JSON.stringify(call?.[2])).not.toContain('phone-1');
       expect(call?.[3]).toMatchObject({ continueFromHistory: true, sourceCapabilitySelectionText: 'original text' });
     });
 
@@ -2420,8 +2420,8 @@ describe('withReplaySourceNotes', () => {
     });
     const text = JSON.stringify(member);
     expect(text).toContain('本条由共享任务成员「张三」(member_id: m-1) 发送');
-    expect(text).toContain('[客户端说明]');
-    expect(text).toContain('phone-1');
+    expect(text).not.toContain('[客户端说明]');
+    expect(text).not.toContain('phone-1');
   });
 
   it('leaves local input untouched and never hands a bare string back for re-parsing', () => {

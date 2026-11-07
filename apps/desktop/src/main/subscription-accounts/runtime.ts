@@ -14,10 +14,7 @@ import { providerGroupMemberUsageState } from '../provider-group/usage.js';
 import { providerGroupCodexUsageFromReads } from '../provider-group/usage.js';
 import { providerGroupCodexUsageSnapshot } from '../provider-group/usage.js';
 import { codexLimitBucketKey } from '@cindy/maker-shared/codex-usage-buckets';
-import {
-  mergeClaudeSubscriptionUsageSnapshot,
-  parseClaudeSdkRateLimitInfo,
-} from '../../shared/claudeSubscriptionUsage.js';
+import type { ClaudeSubscriptionUsageSnapshot } from '../../shared/claudeSubscriptionUsage.js';
 import type {
   SubscriptionAccountCommand,
   SubscriptionAccountUsage,
@@ -47,7 +44,7 @@ import {
 } from './nativeCli.js';
 
 type Usage = {
-  claudeUsage?: ReturnType<typeof parseClaudeSdkRateLimitInfo>;
+  claudeUsage?: ClaudeSubscriptionUsageSnapshot | null;
   codexUsage?: ReturnType<typeof providerGroupCodexUsageFromReads>;
   codexCredits?: NonNullable<SubscriptionAccountUsage['codex']>['credits'];
 };
@@ -161,8 +158,8 @@ export function observeSubscriptionAccountUsage(
   const key = account.id.slice(account.id.indexOf(':') + 1);
   const cached = state.cache.get(key);
   if (!cached) return;
-  const provider = key.startsWith('anthropic:') ? 'anthropic' : 'openai';
-  const incoming = provider === 'anthropic' ? parseClaudeSdkRateLimitInfo(raw, Date.now()) : null;
+  if (key.startsWith('anthropic:')) return;
+  const provider = 'openai';
   const codexEvent =
     provider === 'openai' && raw && typeof raw === 'object' && !Array.isArray(raw)
       ? (raw as Record<string, unknown>)
@@ -187,14 +184,7 @@ export function observeSubscriptionAccountUsage(
           webSnapshot: previousCodex?.webSnapshot,
         })
       : previousCodex;
-  const usage: Usage =
-    provider === 'anthropic'
-      ? {
-          claudeUsage: incoming
-            ? mergeClaudeSubscriptionUsageSnapshot(cached.usage?.claudeUsage ?? null, incoming)
-            : cached.usage?.claudeUsage,
-        }
-      : { ...cached.usage, codexUsage };
+  const usage: Usage = { ...cached.usage, codexUsage };
   state.cache.set(key, { ...cached, usage, at: Date.now() });
   changed(provider);
 }
@@ -232,7 +222,7 @@ async function snapshot(
           cached?.auth.identity === auth.identity &&
           cached?.usageAt !== undefined &&
           Date.now() - cached.usageAt < 180_000;
-        const usage = auth.authenticated
+        const usage = auth.authenticated && provider !== 'anthropic'
           ? reuseUsage
             ? cached?.usage
             : await readNativeAccountUsage(provider, directory).catch(() =>

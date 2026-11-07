@@ -7,7 +7,7 @@ export default {
   notCovered:
     'Real browser sign-in, credentials, native CLI processes or transport; fixture supplies account metadata only',
   cases: {
-    default: { about: 'Three Claude accounts with quota, pause and long identity' },
+    default: { about: 'Three Claude accounts with pause and long identity, without quota cards' },
     narrow: { about: '320-pixel content width without clipped account controls' },
     codex: { about: 'Codex accounts and weight strategy' },
     error: { about: 'Unavailable status read and inline retry on focus' },
@@ -21,7 +21,7 @@ export default {
     }
     assert.equal(await page.getByRole('switch').count(), 3);
     assert.equal(await page.getByRole('combobox').first().getAttribute('data-setting-id'), 'providers.subscriptionAccounts');
-    assert.equal(await page.getByRole('progressbar').count(), 3);
+    assert.equal(await page.getByRole('progressbar').count(), ui.case === 'codex' ? 3 : 0);
     await page.getByRole('switch').first().click();
     await page.getByRole('switch').first().waitFor();
     assert.equal(await page.getByRole('switch').first().getAttribute('aria-checked'), 'false');

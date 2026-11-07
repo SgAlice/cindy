@@ -17,7 +17,6 @@ import {
   formatSourceRef,
   messageSourceSenderFromMeta,
   readMessageSourceGroup,
-  readMessageSourceDevice,
   promptSafeSourceName,
 } from '@cindy/maker-shared/message-source';
 
@@ -276,11 +275,6 @@ export function describeHandoffUserSource(message: Pick<HandoffSourceMessage, 'c
   if (im !== undefined) {
     const channel = imChannelDisplayName(im) ?? promptSafeSourceName(im);
     if (channel) parts.push(`来自${/^[A-Za-z]/.test(channel) ? ` ${channel}` : channel}`);
-  }
-  const device = readMessageSourceDevice(meta);
-  if (device) {
-    const where = device.platform === 'mobile' ? '手机' : '另一台电脑';
-    parts.push(`在${where}${formatSourceRef(device.name, 'device_id', device.deviceId)} 上发送`);
   }
   return parts.length > 0 ? parts.join(' · ').replace(/ {2,}/g, ' ') : null;
 }
@@ -1011,6 +1005,7 @@ export function prependNoteToWireUserMessage(
   message: HandoffWireMessage,
   note: string,
 ): HandoffWireMessage {
+  if (!note.trim()) return message;
   if (typeof message === 'string') {
     return `${note}\n\n${message}`;
   }

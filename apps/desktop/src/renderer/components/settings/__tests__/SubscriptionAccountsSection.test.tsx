@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SubscriptionPoolView } from '../../../../shared/subscriptionAccounts';
 
@@ -59,36 +59,32 @@ beforeEach(() => {
 });
 
 describe('SubscriptionAccountsSection usage', () => {
-  it('keeps the provider card on the default account and shows every window of added accounts', async () => {
+  it('keeps Claude account controls but hides all default and cached quota cards', async () => {
     render(
       <SubscriptionAccountsSection
         providerId="anthropic"
         defaultUsage={<div data-testid="original-card">original</div>}
       />,
     );
-    const original = await screen.findByTestId('original-card');
+    await screen.findByText('first@example.test');
     const rows = screen.getByTestId('subscription-accounts').querySelectorAll('.py-4');
     expect(rows).toHaveLength(2);
-    expect(within(rows[0] as HTMLElement).getByTestId('original-card')).toBe(original);
-    expect(screen.getAllByTestId('original-card')).toHaveLength(1);
-    const added = within(rows[1] as HTMLElement);
-    for (const name of ['quotaCard.fiveHourLabel', 'quotaCard.weeklyLabel', 'Fable weekly'])
-      expect(added.getByRole('progressbar', { name })).toBeTruthy();
-    expect(within(rows[0] as HTMLElement).queryByRole('progressbar')).toBeNull();
+    expect(screen.queryByTestId('original-card')).toBeNull();
+    expect(screen.queryByRole('progressbar')).toBeNull();
   });
   // Regression: a failed refresh kept the list and also showed the provider card below it.
-  it('shows the provider card once when a refresh fails after the list loaded', async () => {
+  it('does not restore Claude quota cards when an account refresh fails', async () => {
     render(
       <SubscriptionAccountsSection
         providerId="anthropic"
         defaultUsage={<div data-testid="original-card">original</div>}
       />,
     );
-    await screen.findByTestId('original-card');
+    await screen.findByText('first@example.test');
     vi.mocked(window.electronAPI.subscriptionAccounts.command).mockRejectedValueOnce(new Error('offline'));
     fireEvent.focus(window);
     expect(await screen.findByRole('alert')).toBeTruthy();
-    expect(screen.getAllByTestId('original-card')).toHaveLength(1);
+    expect(screen.queryByTestId('original-card')).toBeNull();
   });
   // Regression: a connected account's menu offered plain "Sign in", reading as if it were signed out.
   it.each([

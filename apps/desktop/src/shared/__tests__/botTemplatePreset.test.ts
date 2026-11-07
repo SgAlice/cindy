@@ -10,6 +10,12 @@ const previousDefaultIdentity = [
 ].join('\n\n');
 
 describe('Cindy identity compatibility', () => {
+  it('does not assign a Cindy identity to new profiles and still recognizes the previous template', () => {
+    expect(CINDY_DEFAULT_IDENTITY).not.toContain('你是 Cindy');
+    const previous = previousDefaultIdentity.split('\n\n')[0] + '\n\n' + CINDY_DEFAULT_IDENTITY;
+    expect(inferBotTemplatePresetId(previous)).toBe('cindy');
+    expect(inferBotTemplatePresetId(previous + '\nCustom identity')).toBeNull();
+  });
   it('recognizes shipped default identities after the template changes', () => {
     expect(inferBotTemplatePresetId(BOT_TEMPLATE_PRESET_IDENTITIES.cindy)).toBe('cindy');
     expect(inferBotTemplatePresetId(CINDY_DEFAULT_IDENTITY)).toBe('cindy');

@@ -31,7 +31,6 @@ import { incrementDailyModelUsage, type DailyModelUsageDelta } from './localDb/d
 import { incrementDailySessionUsage } from './localDb/dailySessionUsage';
 import { getCurrentDbClientUserId, getDbClient } from './localDb/client/current';
 import {
-  mergeClaudeSubscriptionUsageSnapshot,
   type ClaudeSubscriptionUsageSnapshot,
 } from '../shared/claudeSubscriptionUsage';
 import type { XaiSubscriptionUsageSnapshot } from '../shared/xaiSubscriptionUsage';
@@ -874,155 +873,16 @@ export function clearXaiRateLimitSnapshot(providerId = 'xai'): void {
 }
 
 
-// ── Claude subscription usage (persisted latest snapshot) ───────────────────
-// 与上面 Codex account usage 段对称:内存缓存 + account_usage_snapshots 落库
-// (agent_kind='claude-code') + 广播。数据源有两个(oauth 端点全量 / unified headers
-// 增量),merge 语义在 shared/claudeSubscriptionUsage.ts。
-
-// owner 是否已初始化 —— 区分「main 启动后从未读过 owner」与「owner 真的变化」。
-// 首次初始化不是失效事件(缓存本来就空), 不得 bump 世代: record 在 ensure 之前
-// 捕获世代, 若首次初始化也 bump, 每次 main 启动后的**第一笔**快照会被世代复查
-// 误丢(headers 单笔 + 端点 180s 节流时, chip 要空到下一次刷新)。
-let claudeSubscriptionUsageOwnerInitialized = false;
-let claudeSubscriptionUsageOwner: string | null = null;
-/** 与 codex 侧 codexAccountUsageHydrated 同义: 落库守卫 + 「无需再读库」的判据。 */
-let claudeSubscriptionUsageHydrated = false;
-let claudeSubscriptionUsageSnapshot: ClaudeSubscriptionUsageSnapshot | null = null;
-// 冷缓存 hydration 的 in-flight promise —— 并发 record 必须等同一次 SQLite 读完成后
-// 再按到达顺序 merge, 否则后到的新快照会先写、再被读回的旧持久化行覆盖。
-let claudeSubscriptionUsageLoadPromise: Promise<void> | null = null;
-// 世代计数: clear / owner 变化时 +1, 让仍在飞的 hydration 放弃赋值(不复活旧数据)。
-let claudeSubscriptionUsageGeneration = 0;
-
-function resetClaudeSubscriptionUsageCacheIfOwnerChanged(): void {
-  const owner = currentAccountUsageOwner();
-  if (claudeSubscriptionUsageOwnerInitialized && owner === claudeSubscriptionUsageOwner) return;
-  const isFirstInit = !claudeSubscriptionUsageOwnerInitialized;
-  claudeSubscriptionUsageOwnerInitialized = true;
-  claudeSubscriptionUsageOwner = owner;
-  // 首次初始化: loaded / snapshot 本就是初值, 世代不 bump(见上方注释)。
-  if (isFirstInit) return;
-  claudeSubscriptionUsageHydrated = false;
-  claudeSubscriptionUsageSnapshot = null;
-  claudeSubscriptionUsageGeneration += 1;
-}
-
-async function ensureClaudeSubscriptionUsageLoaded(): Promise<void> {
-  resetClaudeSubscriptionUsageCacheIfOwnerChanged();
-  if (claudeSubscriptionUsageHydrated) return;
-  if (!claudeSubscriptionUsageLoadPromise) {
-    const generation = claudeSubscriptionUsageGeneration;
-    claudeSubscriptionUsageLoadPromise = (async () => {
-      try {
-        if (!claudeSubscriptionUsageOwner) return;
-        const row = await getDbClient().queryOne<{ snapshot?: string | null }>(
-          'SELECT snapshot FROM account_usage_snapshots WHERE agent_kind = ?',
-          ['claude-code'],
-        );
-        // clear / owner 变化抢先发生 → 本次读结果作废, 不覆盖更新的内存状态。
-        if (generation !== claudeSubscriptionUsageGeneration) return;
-        // 读到库就算 hydrated(理由同 codex 侧, 含损坏行仍允许被覆盖)。
-        claudeSubscriptionUsageHydrated = true;
-        if (!row?.snapshot) return;
-        const parsed = JSON.parse(row.snapshot);
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          // 理由同 codex 侧: 内存里可能是重试期间收到的更新快照, 库里的行是旧的 ——
-          // 以持久化行为底、内存增量在上做一次常规 merge, 而不是直接赋值。
-          const persisted = parsed as ClaudeSubscriptionUsageSnapshot;
-          claudeSubscriptionUsageSnapshot = claudeSubscriptionUsageSnapshot
-            ? mergeClaudeSubscriptionUsageSnapshot(persisted, claudeSubscriptionUsageSnapshot)
-            : persisted;
-        }
-      } catch (err) {
-        log.warn(
-          'readClaudeSubscriptionUsageSnapshot failed:',
-          err instanceof Error ? err.message : String(err),
-        );
-      }
-    })();
-  }
-  try {
-    await claudeSubscriptionUsageLoadPromise;
-  } finally {
-    // 清理放在 await 之后, 理由同 codex 侧: owner 缺失时 IIFE 同步走完, 放进它的
-    // finally 会被外层赋值写回, 之后永远复用这个已 resolve 的 Promise。
-    claudeSubscriptionUsageLoadPromise = null;
-  }
-}
-
-export async function recordClaudeSubscriptionUsageSnapshot(snapshot: unknown): Promise<void> {
-  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return;
-
-  // 世代守卫与 hydration 内部一致: record 是 fire-and-forget, await 期间 clear
-  // (登出 / 换号) 或 owner 变化抢先发生时, 本笔必须整体丢弃 —— 否则恢复后的
-  // merge / 广播 / 写库会把刚清掉的数据复活。
-  const generation = claudeSubscriptionUsageGeneration;
-  await ensureClaudeSubscriptionUsageLoaded();
-  if (generation !== claudeSubscriptionUsageGeneration) return;
-
-  const next = mergeClaudeSubscriptionUsageSnapshot(
-    claudeSubscriptionUsageSnapshot,
-    snapshot as ClaudeSubscriptionUsageSnapshot,
-  );
-  claudeSubscriptionUsageSnapshot = next;
-  broadcastClaudeSubscriptionUsage(next);
-
-  // 与 codex 侧同一条保护: merge 的底子不可信时不写回。
-  if (!claudeSubscriptionUsageHydrated) {
-    log.warn('skip persisting claude subscription usage snapshot: hydration unavailable');
-    return;
-  }
-
-  try {
-    await getDbClient().exec(
-      `INSERT INTO account_usage_snapshots (agent_kind, snapshot, updated_at)
-       VALUES (?, ?, ?)
-       ON CONFLICT(agent_kind) DO UPDATE SET
-         snapshot = excluded.snapshot,
-         updated_at = excluded.updated_at`,
-      ['claude-code', JSON.stringify(next), Date.now()],
-    );
-    if (generation !== claudeSubscriptionUsageGeneration) {
-      // clear 在写库 await 期间抢先: 内存已被 clear 正确置 null, 但本 INSERT 可能
-      // 晚于 clear 的 DELETE 落盘 —— 补偿删除, 防止下次冷启动 hydration 读回残留。
-      await getDbClient().exec(
-        'DELETE FROM account_usage_snapshots WHERE agent_kind = ?',
-        ['claude-code'],
-      );
-    }
-  } catch (err) {
-    log.warn(
-      'recordClaudeSubscriptionUsageSnapshot failed:',
-      err instanceof Error ? err.message : String(err),
-    );
-  }
+export async function recordClaudeSubscriptionUsageSnapshot(_snapshot: unknown): Promise<void> {
+  return;
 }
 
 export async function clearClaudeSubscriptionUsageSnapshot(): Promise<void> {
-  resetClaudeSubscriptionUsageCacheIfOwnerChanged();
-  // clear 后库里的状态是已知的(行被删掉): 既不必再读库, 之后到达的快照也可正常落库。
-  claudeSubscriptionUsageHydrated = true;
-  claudeSubscriptionUsageSnapshot = null;
-  // 仍在飞的冷缓存 hydration 必须作废 —— 否则它读回的旧持久化行会复活刚清掉的数据。
-  claudeSubscriptionUsageGeneration += 1;
   broadcastClaudeSubscriptionUsage(null);
-
-  try {
-    await getDbClient().exec(
-      'DELETE FROM account_usage_snapshots WHERE agent_kind = ?',
-      ['claude-code'],
-    );
-  } catch (err) {
-    log.warn(
-      'clearClaudeSubscriptionUsageSnapshot failed:',
-      err instanceof Error ? err.message : String(err),
-    );
-  }
 }
 
 export async function readClaudeSubscriptionUsageSnapshot(): Promise<ClaudeSubscriptionUsageSnapshot | null> {
-  await ensureClaudeSubscriptionUsageLoaded();
-  return claudeSubscriptionUsageSnapshot;
+  return null;
 }
 
 // ── xAI / SuperGrok subscription usage (persisted latest snapshot) ──────────
